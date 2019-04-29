@@ -391,7 +391,7 @@ class linear_vl:
 				if print_flag:
 					print('epoch {} MSE: {}'.format(k, mse))
 					# print('Q1: {}, R2: {}'.format(sess.run(self.model.Q1), sess.run(self.model.R2)))
-					print('Q1: {}'.format(sess.run(self.model.Q1)))
+					print('Q0: {}, Q1: {}'.format(sess.run(self.model.Q0), sess.run(self.model.Q1)))
 
 			# update the model parameters
 			self.params_values['G1'] = sess.run(self.model.G1_real) + 1j * sess.run(self.model.G1_imag)

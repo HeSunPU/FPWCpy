@@ -64,17 +64,17 @@ if __name__ == "__main__":
 	weight = np.ones(len(wavelength))
 	alpha = 3e-7
 	img_number = 8
-	exp_time = 10
+	exp_time = 1
 
 	# define the wavefront estimator
 	params_values = {}
 	params_values['G1'] = G1
 	params_values['G2'] = G2
-	params_values['Q0'] = 1e-12
-	params_values['Q1'] = 0.15 # 0.05 # 0.5 # 1e-8 for u^2, 6e-8 for u^3, 0.5 for dE^2
+	params_values['Q0'] = 1e-14
+	params_values['Q1'] = 0.5 # 0.05 # 0.5 # 1e-8 for u^2, 6e-8 for u^3, 0.5 for dE^2
 	params_values['R0'] = 3.6e-17#/exp_time**2 #1e-14
 	params_values['R1'] = 5e-10#/exp_time #1e-9
-	params_values['R2'] = 4 * params_values['Q1']#4 * 0.045 #5e-3 # 5e-3 # 1e-2
+	# params_values['R2'] = 4 * params_values['Q1']#4 * 0.045 #5e-3 # 5e-3 # 1e-2
 	BPE_estimator = est.Batch_process(params_values)
 	KF_estimator = est.Kalman_filter(params_values)
 
@@ -87,8 +87,8 @@ if __name__ == "__main__":
 	camera = detector.CCD(flux=2e9, readout_std=12, readout=True, photon=True, exp_time=exp_time)
 
 	# define the system identifier for adaptive control
-	# n_batch = 5
-	# vl = sysid.linear_vl(params_values, img_number//2)
+	n_batch = 10
+	vl = sysid.linear_vl(params_values, img_number//2)
 
 	# decide whether to save the wfsc data
 	save_data_flag = True
@@ -105,7 +105,7 @@ if __name__ == "__main__":
 	# Ef_vector_set = []
 	# P_est_set = []
 	# contrast_set = []
-
+	# n_trials = 5
 	# for trial in range(n_trials):
 	# start wavefront control
 	u1 = np.zeros((34, 34))
@@ -120,8 +120,8 @@ if __name__ == "__main__":
 		# Ef = sp.ndimage.shift(Ef.real, shift=[0.5, 0.5, 0]) + 1j * sp.ndimage.shift(Ef.imag, shift=[0.5, 0.5, 0])
 		Ef_vector = Ef[dh_ind1, dh_ind2, :]
 		If_vector = np.abs(Ef_vector)**2
-		If = camera.Add_noise(If_vector)
 		contrast[k] = np.mean(If_vector)
+		If = camera.Add_noise(If_vector)
 		print('The contrast at step #{} is {}'.format(k, contrast[k]))
 		E_true.append(Ef_vector)
 		
@@ -130,18 +130,18 @@ if __name__ == "__main__":
 		# exp_time = camera.exp_time
 		print('The exposure time at step #{} is {}'.format(k, exp_time))
 
-		R_coef = [params_values['R0']/exp_time**2, params_values['R1']/exp_time, params_values['R2']]
+		R_coef = [params_values['R0']/exp_time**2, params_values['R1']/exp_time+4*params_values['Q0'], 4*params_values['Q1']]
 		u_p = sensor0.Probe_command(contrast[k], k, index=1, R_coef=R_coef)
-		u_p_values = u_p[model.DMind1, model.DMind2, :].T
+		# u_p_values = u_p[model.DMind1, model.DMind2, :].T
 
-		contrast_p = np.sqrt(params_values['R0']/exp_time**2/params_values['R2'] + \
-					(params_values['R1']/exp_time + 4*params_values['Q0'])*contrast[k]/params_values['R2'])
-		print('designed probe contrast is {}.'.format(contrast_p))
+		# contrast_p = np.sqrt(params_values['R0']/exp_time**2/(4*params_values['Q1']) + \
+		# 			(params_values['R1']/exp_time + 4*params_values['Q0'])*contrast[k]/(4*params_values['Q1']))
+		# print('designed probe contrast is {}.'.format(contrast_p))
 
-		u_p = np.zeros((model.Nact, model.Nact, img_number//2))
-		# u_p_values = 3e2 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
-		u_p_values = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=3e-1, gamma=1., Nitr=1000, print_flag=True)
-		u_p[model.DMind1, model.DMind2, :] = u_p_values.T
+		# u_p = np.zeros((model.Nact, model.Nact, img_number//2))
+		# # u_p_values = 3e2 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
+		# u_p_values = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=3e-1, gamma=1., Nitr=1000, print_flag=True)
+		# u_p[model.DMind1, model.DMind2, :] = u_p_values.T
 
 		
 		# , R_coef=[params_values['R0'], params_values['R1'], params_values['R2']]
@@ -170,11 +170,14 @@ if __name__ == "__main__":
 
 		# Ef_est = Ef_vector
 		u_p_vector = u_p[model.DMind1, model.DMind2, :]
-		if k >= 0:
+		if k <= 0:
 			Ef_est, P_est = BPE_estimator.Estimate(If_p, u_p_vector, np.zeros(u_p_vector.shape), exp_time)
 		else:
+			if k == 1:
+				P_est = 9 * P_est
 			Ef_est, P_est = KF_estimator.Estimate(If_p, u_p_vector, np.zeros(u_p_vector.shape), Ef_est, P_est, 
 												command[0:n_act], command[n_act::], exp_time)
+		
 		# compute control command
 		command = EFC(Ef_est, G, weight, alpha)
 		u1[model.DMind1, model.DMind2] += command[:int(len(command)/2):]
@@ -205,8 +208,6 @@ if __name__ == "__main__":
 	# 		G1 = params_values['G1']
 	# 		G2 = params_values['G2']
 	# 		G = np.concatenate((G1, G2), axis=1)
-
-	
 
 	# contrast_set.append(contrast)
 

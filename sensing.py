@@ -21,7 +21,7 @@ class Optimal_probe:
 		Q1 = params_values['Q1']
 		R0 = params_values['R0']
 		R1 = params_values['R1']
-		R2 = params_values['R2']
+		R2 = 4 * params_values['Q1']
 
 		self.img_number = img_number
 		self.n_act = G1.shape[1] # number of active actuators on the DM
@@ -47,7 +47,7 @@ class Optimal_probe:
 
 		# probe_contrast_opt = tf.sqrt(R0/(self.t)**2/R2 + R1/self.t/R2*self.contrast + self.contrast**2)
 		# probe_contrast_opt = tf.minimum(tf.sqrt(self.contrast * 1e-5), 5e-4)
-		probe_contrast_opt = tf.sqrt(R0/(self.t)**2/R2 + R1/self.t/R2*self.contrast)
+		probe_contrast_opt = tf.sqrt(R0/(self.t)**2/R2 + (R1/self.t+4*Q0)/R2*self.contrast)
 		probe_contrast_opt_sqrt = tf.sqrt(probe_contrast_opt)
 
 		probe_dot = tf.real(tf.conj(probe[0::2, :]) * probe[1::2, :]) / (tf.abs(probe[0::2, :]) * tf.abs(probe[1::2, :]))
@@ -63,7 +63,7 @@ class Optimal_probe:
 		# 	R1*(self.contrast+probe_contrast_opt)*tf.eye(self.n_pair, dtype=tf.float64)/self.t + \
 		# 	R2 *(self.contrast**2+probe_contrast_opt**2+6*self.contrast*probe_contrast_opt) * tf.eye(self.n_pair, dtype=tf.float64))
 
-		R = 0.125 * (R0/(self.t)**2 + R1/self.t * (self.contrast + tf.abs(probe)**2) + R2 * tf.abs(probe)**2 * (self.contrast + tf.abs(probe)**2)) / tf.abs(probe)**2
+		R = 0.125 * (R0/(self.t)**2 + (R1/self.t+4*Q0) * (self.contrast + tf.abs(probe)**2) + R2 * tf.abs(probe)**2 * (self.contrast + tf.abs(probe)**2)) / tf.abs(probe)**2
 		# R = tf.matrix_diag(tf.transpose(R, [1, 0]))
 		R = R[0::2, :]*R[1::2, :]
 		# self.R = R
@@ -207,6 +207,8 @@ class Empirical_probe:
 		for k in range(count):
 			if self.method.lower() == 'rot':
 				probeSP = self.ProbeShape(offsets[k], probeContrast)
+			if self.method.lower() == 'rot_alter':
+				probeSP = self.ProbeShape(offsets[k], probeContrast, axis=itr%2)
 			elif self.method.lower() == 'alter':
 				probeSP = self.ProbeShape(offsets[k], probeContrast, axis=k%2)
 
