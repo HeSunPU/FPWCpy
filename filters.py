@@ -104,11 +104,10 @@ def EKF(y, delta_xc, delta_xp, x_old, P_old, Q, R):
     P_new0 = P_old + Q # predict the new covariance
     
     H = np.empty((y.shape[0], x_old.shape[0]))
-    H[0, :] = np.array([2*x_new0[0], 2*x_new0[1], 1])
     for i in range(delta_xp.shape[0]):
-        H[i+1, :] = np.array([2*(x_new0[0]+delta_xp[i, 0]), 2*(x_new0[1]+delta_xp[i, 1]), 1])
+        H[i, :] = np.array([2*(x_new0[0]+delta_xp[i, 0]), 2*(x_new0[1]+delta_xp[i, 1]), 1])
     
-    y_new0 = [x_new0[0]**2+x_new0[1]**2+x_new0[2]]
+    y_new0 = []
     for i in range(delta_xp.shape[0]):
         y_new0.append((x_new0[0]+delta_xp[i, 0])**2+(x_new0[1]+delta_xp[i, 1])**2+x_new0[2])
     y_new0 = np.array(y_new0).reshape((-1, 1))
@@ -133,11 +132,10 @@ def IEKF(y, delta_xc, delta_xp, x_old, P_old, Q, R, iterations):
     P_new0 = P_old + Q # predict the new covariance
     
     H = np.empty((y.shape[0], x_old.shape[0]))
-    H[0, :] = np.array([2*x_new0[0], 2*x_new0[1], 1])
     for i in range(delta_xp.shape[0]):
-        H[i+1, :] = np.array([2*(x_new0[0]+delta_xp[i, 0]), 2*(x_new0[1]+delta_xp[i, 1]), 1])
+        H[i, :] = np.array([2*(x_new0[0]+delta_xp[i, 0]), 2*(x_new0[1]+delta_xp[i, 1]), 1])
     
-    y_new0 = [x_new0[0]**2+x_new0[1]**2+x_new0[2]]
+    y_new0 = []
     for i in range(delta_xp.shape[0]):
         y_new0.append((x_new0[0]+delta_xp[i, 0])**2+(x_new0[1]+delta_xp[i, 1])**2+x_new0[2])
     y_new0 = np.array(y_new0).reshape((-1, 1))
@@ -149,10 +147,9 @@ def IEKF(y, delta_xc, delta_xp, x_old, P_old, Q, R, iterations):
     
     # start iterated Kalman filter
     for k in range(iterations):
-        H[0, :] = np.array([2*x_new1[0], 2*x_new1[1], 1])
         for i in range(delta_xp.shape[0]):
-            H[i+1, :] = np.array([2*(x_new1[0]+delta_xp[i, 0]), 2*(x_new1[1]+delta_xp[i, 1]), 1])
-        y_new1 = [x_new1[0]**2+x_new1[1]**2+x_new1[2]]
+            H[i, :] = np.array([2*(x_new1[0]+delta_xp[i, 0]), 2*(x_new1[1]+delta_xp[i, 1]), 1])
+        y_new1 = []
         for i in range(delta_xp.shape[0]):
             y_new1.append((x_new1[0]+delta_xp[i, 0])**2+(x_new1[1]+delta_xp[i, 1])**2+x_new1[2])
         y_new1 = np.array(y_new1).reshape((-1, 1))

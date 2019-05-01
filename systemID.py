@@ -98,11 +98,16 @@ class SSM(object):
 		# observation model
 		n_probe = self.n_observ
 		E_p_list = []
+		I_p_correction_list = []
 		for k in range(n_probe):
 			E_p = self.transition(Enp, u_p1[:, k, :], u_p2[:, k, :])
 			E_p_list.append(tf.expand_dims(E_p, 1))
+			I_p_correction = 2*self.transition_covariance(Enp, u_p1[:, k, :], u_p2[:, k, :])
+			I_p_correction_list.append(tf.expand_dims(I_p_correction, 1))
+
 		E_p_obs = tf.concat(E_p_list, axis=1)
-		I_p_obs = tf.abs(E_p_obs)**2
+		I_p_cor = tf.concat(I_p_correction_list, axis=1)
+		I_p_obs = tf.abs(E_p_obs)**2 + I_p_cor
 		return E_p_obs, I_p_obs
 	def observation_covariance(self, I_p_obs, u_p1, u_p2):#(self, Enp, u_p1, u_p2):
 		# covariance of observation noises
