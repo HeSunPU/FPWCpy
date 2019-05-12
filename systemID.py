@@ -149,7 +149,7 @@ def LSEnet(model, Ip, u1p, u2p):
 	R = tf.matrix_set_diag(tf.concat([tf.expand_dims(tf.zeros_like(R_diff), -1)]*(n_observ//2), -1), R_diff)
 	P_new = tf.matmul(tf.matmul(Ht_H_inv_Ht, R), tf.transpose(Ht_H_inv_Ht, [0, 1, 3, 2]))
 	Enp_pred_new = tf.cast(x_new[:, :, 0], dtype=tf.complex128) + 1j * tf.cast(x_new[:, :, 1], dtype=tf.complex128)
-	return Enp_pred_new, P_new
+	return Enp_pred_new, P_new, H
 
 def KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p):
 	# computation graph that defines Kalman filtering estimation of the electric field
@@ -163,7 +163,9 @@ def KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p):
 
 	n_observ = model.n_observ
 	contrast_p = tf.reduce_mean(Ip, axis=2)
-	Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + model.R2*contrast_p**2, axis=-1), 
+	d_contrast_p = tf.reduce_mean(tf.abs(delta_Ep_pred)**2, axis=2)
+
+	Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + 4*(model.Q0+model.Q1*d_contrast_p)*contrast_p, axis=-1), 
 						tf.ones((1, model.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
 	Rp = tf.transpose(Rp, [0, 2, 1])
 	R_diff = Rp[:, :, 1::2]+Rp[:, :, 2::2]
@@ -225,14 +227,14 @@ class linear_vl:
 		Enp_pred = model.transition(Enp_old, u1c, u2c)
 		Qco = model.transition_covariance(Enp_old, u1c, u2c)
 
-		Enp_est, P_est = LSEnet(model, Ip, u1p, u2p)
-		Enp_est2, P_est2 = LSEnet(model, Ip, u1p, u2p)
+		Enp_est, P_est, H = LSEnet(model, Ip, u1p, u2p)
+		Enp_est2, P_est2, _ = LSEnet(model, Ip, u1p, u2p)
 		# Enp_est, P_est = KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p)
 
 
 		_, Ip_pred = model.observation(Enp_est, u1p, u2p)
 		Ip_pred_err = tf.tile(tf.expand_dims(tf.trace(P_est), 1), [1, n_image, 1])
-		obs_cov = 4 * Ip * tf.tile(tf.expand_dims(tf.trace(P_est), 1), [1, n_image, 1])
+		obs_cov = 0.#4 * tf.tensordot(tf.expand_dims(tf.reduce_mean(Ip, -1), -1), tf.ones((1, n_pix), dtype=tf.float64), [-1, 0]) * tf.tile(tf.expand_dims(tf.trace(P_est), 1), [1, n_image, 1])
 		Rp = model.observation_covariance(Ip, u1p, u2p)
 
 		# Ip_pred_diff = Ip_pred[:, 1::2, :] - Ip_pred[:, 2::2, :]
@@ -246,6 +248,10 @@ class linear_vl:
 		elbo = - tf.reduce_sum((tf.abs(Ip-Ip_pred-Ip_pred_err)**2 + obs_cov) / Rp) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
 				(tf.reduce_sum(tf.abs(Enp_pred-Enp_est)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) - \
 				 tf.reduce_sum(tf.linalg.logdet(P_est)) + tf.reduce_sum(tf.trace(P_est) / Qco))
+
+		# elbo = - (tf.reduce_sum(tf.abs(Enp_pred-Enp_est)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) - \
+		# 		 tf.reduce_sum(tf.linalg.logdet(P_est)) + tf.reduce_sum(tf.trace(P_est) / Qco))
+
 
 		# elbo = - tf.reduce_sum((tf.abs(Ip_diff-Ip_pred_diff)**2 + obs_bias) / Rp_diff) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
 		# 		(tf.reduce_sum(tf.abs(Enp_pred-Enp_est)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) - \
@@ -279,7 +285,7 @@ class linear_vl:
 		# self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
 		# 										beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[4::])
 		self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
-												beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=[params_list[5]])
+												beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=[params_list[4], params_list[5]])
 		self.train_group = tf.group(self.train_Jacobian, self.train_noise_coef)
 		self.init = tf.global_variables_initializer()
 
