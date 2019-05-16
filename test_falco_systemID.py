@@ -10,6 +10,8 @@ import detector
 import helper_function as hp
 import matplotlib.pyplot as plt
 import warnings
+import scipy.io as sio
+import falco_systemID as falco
 
 warnings.filterwarnings("ignore")
 plt.ion()
@@ -47,6 +49,7 @@ if __name__ == "__main__":
 	# compute or load the Jacobian matrices
 	# G1, G2 = hp.Compute_Jacobian(model_perfect, dh_ind1, dh_ind2, print_flag=True)
 
+
 	G1 = np.load('vortex_compact_Jacobian1.npy')
 	G2 = np.load('vortex_compact_Jacobian2.npy')
 
@@ -55,15 +58,17 @@ if __name__ == "__main__":
 
 	G = np.concatenate((G1, G2), axis=1)
 
+	path2data = '/home/groot/HCIL/FPWCpy'
+	sio.savemat(path2data+'jacStruct.mat', {'G1': G1, 'G2': G2})
 
 	# define the control parameters
-	Nitr = 40 # number of control iterations
+	Nitr = 20 # number of control iterations
 	n_trials = 1
 	n_act = G1.shape[1] # number of active actuators on the DM
 	n_pix = G1.shape[0] # number of pixels in the dark hole
 	weight = np.ones(len(wavelength))
 	alpha = 3e-7
-	img_number = 4
+	img_number = 8
 	exp_time = 1
 
 	# define the wavefront estimator
@@ -81,7 +86,7 @@ if __name__ == "__main__":
 
 	# define the sensing policy
 	sensor0 = sensing.Empirical_probe(model, params_values, img_number, 
-									pair_wise=True, probe_area=[1, 17, -17, 17], method='rot_alter')
+									pair_wise=True, probe_area=[1, 17, -17, 17], method='alter')
 	sensor = sensing.Optimal_probe(params_values, img_number, pair_wise=True)
 
 	# define the camera noise model
@@ -89,18 +94,19 @@ if __name__ == "__main__":
 
 	# define the system identifier for adaptive control
 	n_batch = 5
-	vl = sysid.linear_vl(params_values, img_number//2)
+	# vl = sysid.linear_vl(params_values, img_number//2)
+
 
 	# decide whether to save the wfsc data
 	save_data_flag = True
 	if save_data_flag:
-		data_train = {}
-		data_train['u1'] = np.ones((n_act, Nitr))
-		data_train['u2'] = np.ones((n_act, Nitr))
-		data_train['u1p'] = np.ones((n_act, img_number, Nitr))
-		data_train['u2p'] = np.ones((n_act, img_number, Nitr))
-		data_train['I'] = np.ones((n_pix, img_number+1, Nitr))
-		data_train['time'] = np.zeros(Nitr)
+		data_train_all = {}
+		data_train_all['u1'] = np.ones((n_act, Nitr))
+		data_train_all['u2'] = np.ones((n_act, Nitr))
+		data_train_all['u1p'] = np.ones((n_act, img_number, Nitr))
+		data_train_all['u2p'] = np.ones((n_act, img_number, Nitr))
+		data_train_all['I'] = np.ones((n_pix, img_number+1, Nitr))
+		data_train_all['time'] = np.zeros(Nitr)
 
 
 	# Ef_est_set = []
@@ -139,21 +145,21 @@ if __name__ == "__main__":
 		R_coef = [params_values['R0']/exp_time**2, params_values['R1']/exp_time+4*params_values['Q0'], 4*params_values['Q1']]
 		u_p = sensor0.Probe_command(contrast[k], k, index=1, R_coef=R_coef)
 		
-		# u_p_nominal_set.append(np.array(u_p))
+		# # u_p_nominal_set.append(np.array(u_p))
 
-		u_p_values = u_p[model.DMind1, model.DMind2, :].T
+		# u_p_values = u_p[model.DMind1, model.DMind2, :].T
 
-		contrast_p = np.sqrt(params_values['R0']/exp_time**2/(4*params_values['Q1']) + \
-					(params_values['R1']/exp_time + 4*params_values['Q0'])*contrast[k]/(4*params_values['Q1']))
-		print('designed probe contrast is {}.'.format(contrast_p))
+		# contrast_p = np.sqrt(params_values['R0']/exp_time**2/(4*params_values['Q1']) + \
+		# 			(params_values['R1']/exp_time + 4*params_values['Q0'])*contrast[k]/(4*params_values['Q1']))
+		# print('designed probe contrast is {}.'.format(contrast_p))
 
-		u_p = np.zeros((model.Nact, model.Nact, img_number//2))
-		# u_p_values = 1e1 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
+		# u_p = np.zeros((model.Nact, model.Nact, img_number//2))
+		# # u_p_values = 1e1 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
 
-		u_p_values = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=0., gamma=1., Nitr=2000, print_flag=True)
-		u_p[model.DMind1, model.DMind2, :] = u_p_values.T
+		# u_p_values = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=0., gamma=1., Nitr=2000, print_flag=True)
+		# u_p[model.DMind1, model.DMind2, :] = u_p_values.T
 
-		# u_p_optimal_set.append(np.array(u_p))
+		# # u_p_optimal_set.append(np.array(u_p))
 		
 		if contrast[k] > 0:#contrast_p:
 			If_p = np.empty((len(dh_ind1), len(wavelength), img_number), dtype=float)
@@ -193,7 +199,7 @@ if __name__ == "__main__":
 				print('The contrast of the No.{} postive image is {}'.format(i, np.mean(If_p_vector)))
 
 		# Ef_est = Ef_vector
-		if k <= 0:
+		if k <= 100:
 			u_p_vector = u_p[model.DMind1, model.DMind2, :]
 			Ef_est, P_est = BPE_estimator.Estimate(If_p, u_p_vector, np.zeros(u_p_vector.shape), exp_time)
 		else:
@@ -217,31 +223,51 @@ if __name__ == "__main__":
 		u2[model.DMind1, model.DMind2] += command[int(len(command)/2)::]
 
 		if save_data_flag:
-			data_train['u1'][:, k] = command[0:n_act]
-			data_train['u2'][:, k]= command[n_act::]
+			data_train_all['u1'][:, k] = command[0:n_act]
+			data_train_all['u2'][:, k]= command[n_act::]
 			for k_image in range(img_number):
-				data_train['u1p'][:, k_image, k] = ((-1)**(k_image%2)) * u_p[model.DMind1, model.DMind2, k_image//2]
-				data_train['u2p'][:, k_image, k] = np.zeros((n_act, ))
-			data_train['I'][:, :, k] = np.concatenate([np.squeeze(If).reshape((-1, 1)), np.squeeze(If_p)], 1)
-			data_train['time'][k] = camera.exp_time
-			data_train['contrast'] = contrast
+				data_train_all['u1p'][:, k_image, k] = ((-1)**(k_image%2)) * u_p[model.DMind1, model.DMind2, k_image//2]
+				data_train_all['u2p'][:, k_image, k] = np.zeros((n_act, ))
+			data_train_all['I'][:, :, k] = np.concatenate([np.squeeze(If).reshape((-1, 1)), np.squeeze(If_p)], 1)
+			data_train_all['time'][k] = camera.exp_time
+			data_train_all['contrast'] = contrast
 				
 			# Ef_est_set.append(Ef_est)
 			# Ef_vector_set.append(Ef_vector)
 			# P_est_set.append(P_est)
 
-		# 	if (k+1) % n_batch == 0 and trial > 0 :
-		# 		data_train_now = {}
-		# 		data_train_now['u1'] = data_train['u1'][:, k+1-n_batch:k+1]
-		# 		data_train_now['u2'] = data_train['u2'][:, k+1-n_batch:k+1]
-		# 		data_train_now['u1p'] = data_train['u1p'][:, :, k+1-n_batch:k+1]
-		# 		data_train_now['u2p'] = data_train['u2p'][:, :, k+1-n_batch:k+1]
-		# 		data_train_now['I'] = data_train['I'][:, :, k+1-n_batch:k+1]
-		# 		mse_list = vl.train_params(data_train_now, lr=1e-8, lr2=1e-3, epoch=30, 
-		# 						params_trainable='all', print_flag=True)
-		# 		G1 = params_values['G1']
-		# 		G2 = params_values['G2']
-		# 		G = np.concatenate((G1, G2), axis=1)
+			# if (k+1) % n_batch == 0:
+			# 	data_train = {}
+			# 	data_train['u1'] = data_train_all['u1'][:, k+1-n_batch:k+1]
+			# 	data_train['u2'] = data_train_all['u2'][:, k+1-n_batch:k+1]
+			# 	data_train['u1p'] = data_train_all['u1p'][:, :, k+1-n_batch:k+1]
+			# 	data_train['u2p'] = data_train_all['u2p'][:, :, k+1-n_batch:k+1]
+			# 	data_train['I'] = data_train_all['I'][:, :, k+1-n_batch:k+1]
+				
+			# 	sio.savemat(path2data+'data_train.mat', {'u1': data_train_all['u1'][:, k+1-n_batch:k+1],
+			# 							'u2': data_train_all['u2'][:, k+1-n_batch:k+1],
+			# 							'u1p': data_train_all['u1p'][:, :, k+1-n_batch:k+1],
+			# 							'u2p': data_train_all['u2p'][:, :, k+1-n_batch:k+1],
+			# 							'I': data_train_all['I'][:, :, k+1-n_batch:k+1]})
+			# 	if (k+1)==n_batch:
+			# 		IDnet = falco.vl_net(Q0=1e-14, Q1=0.05, R0=3.6e-17, R1=5e-10, path2data=path2data)
+			# 		falco.linear_vl(IDnet, lr=1e-8, lr2=1e-5, epoch=10, print_flag=True)
+			# 	else:
+			# 		falco.linear_vl(IDnet, lr=1e-8, lr2=1e-5, epoch=10, print_flag=True)
+
+			# 	Jacobian = sio.loadmat((path2data+'jacStructLearned.mat'))
+			# 	G1 = np.expand_dims(Jacobian['G1'], -1)
+			# 	G2 = np.expand_dims(Jacobian['G2'], -1)
+			# 	noise_coef = np.squeeze(Jacobian['noise_coef'])
+
+			# 	params_values['G1'] = G1
+			# 	params_values['G2'] = G2
+			# 	params_values['Q0'] = noise_coef[0]
+			# 	params_values['Q1'] = noise_coef[1]
+			# 	params_values['R0'] = noise_coef[2]
+			# 	params_values['R1'] = noise_coef[3]
+
+			# 	G = np.concatenate((G1, G2), axis=1)
 
 		# contrast_set.append(contrast)
 
