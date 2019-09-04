@@ -85,7 +85,8 @@ if __name__ == "__main__":
 	sensor = sensing.Optimal_probe(params_values, img_number, pair_wise=True)
 
 	# define the camera noise model
-	camera = detector.CCD(flux=2e9, readout_std=12, readout=True, photon=True, exp_time=exp_time)
+	# camera = detector.CCD(flux=2e9, readout_std=12, readout=True, photon=True, exp_time=exp_time)
+	camera = detector.CCD(flux=2e9, readout_std=12, readout=False, photon=True, exp_time=exp_time)
 
 	# define the system identifier for adaptive control
 	n_batch = 5
@@ -148,11 +149,20 @@ if __name__ == "__main__":
 		print('designed probe contrast is {}.'.format(contrast_p))
 
 		u_p = np.zeros((model.Nact, model.Nact, img_number//2))
-		# u_p_values = 1e1 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
 
-		u_p_values = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=0., gamma=1., Nitr=2000, print_flag=True)
+		u_p_values, cost_probe = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=0., gamma=1., Nitr=2000, print_flag=True)
 		u_p[model.DMind1, model.DMind2, :] = u_p_values.T
 
+		# u_p_values_opt = np.random.rand(img_number//2, n_act)
+		# cost_probe_opt = 100
+		# for kk in range(5):
+		# 	u_p_values = 1e1 * np.sqrt(contrast_p) * np.random.rand(img_number//2, n_act)
+		# 	u_p_values, cost_probe = sensor.Probe_command(u_p_values, exp_time, contrast[k], rate=5e-4, beta=0., gamma=1., Nitr=2000, print_flag=True)
+		# 	if cost_probe < cost_probe_opt:
+		# 		u_p_values_opt = u_p_values
+		# 		cost_probe_opt = cost_probe
+		# 	u_p[model.DMind1, model.DMind2, :] = u_p_values.T
+		# u_p[model.DMind1, model.DMind2, :] = u_p_values_opt.T
 		# u_p_optimal_set.append(np.array(u_p))
 		
 		if contrast[k] > 0:#contrast_p:
@@ -193,7 +203,7 @@ if __name__ == "__main__":
 				print('The contrast of the No.{} postive image is {}'.format(i, np.mean(If_p_vector)))
 
 		# Ef_est = Ef_vector
-		if k <= 0:
+		if k <= 100:
 			u_p_vector = u_p[model.DMind1, model.DMind2, :]
 			Ef_est, P_est = BPE_estimator.Estimate(If_p, u_p_vector, np.zeros(u_p_vector.shape), exp_time)
 		else:

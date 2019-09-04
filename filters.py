@@ -160,6 +160,47 @@ def IEKF(y, delta_xc, delta_xp, x_old, P_old, Q, R, iterations):
     
     return x_new1.reshape(x_new1.shape[0]), P_new1, x_new0.reshape(x_new0.shape[0]), P_new0
 
+
+def IEKF_DH(y, delta_xc, x_old, P_old, Q, R, iterations):
+    # Kalman filter estimation
+    # the type of all inputs should be np.array
+    x_old = x_old.reshape((-1, 1))
+    y = y.reshape((-1, 1))
+    #delta_xc = delta_xc.reshape((-1, 2))
+    #delta_xp = delta_xp.reshape((-1, 2))
+    
+    x_new0 = x_old + delta_xc # predict the new state
+    P_new0 = P_old + Q # predict the new covariance
+    
+    H = np.empty((y.shape[0], x_old.shape[0]))
+    for i in range(y.shape[0]):
+        H[i, :] = np.array([2*x_new0[0], 2*x_new0[1], 1])
+    
+    y_new0 = []
+    for i in range(y.shape[0]):
+        y_new0.append((x_new0[0])**2+(x_new0[1])**2+x_new0[2])
+    y_new0 = np.array(y_new0).reshape((-1, 1))
+    
+    S = R + H.dot(P_new0).dot(H.T)
+    K = P_new0.dot(H.T.dot(np.linalg.inv(S))) # optimal Kalman gain
+    x_new1 = x_new0 + K.dot(y-y_new0) # update the state estimation based on observations
+    P_new1 = (np.eye(x_old.shape[0]) - K.dot(H)).dot(P_new0) # update the covariance
+    
+    # start iterated Kalman filter
+    for k in range(iterations):
+        for i in range(y.shape[0]):
+            H[i, :] = np.array([2*x_new1[0], 2*x_new1[1], 1])
+        y_new1 = []
+        for i in range(y.shape[0]):
+            y_new1.append((x_new1[0])**2+(x_new1[1])**2+x_new1[2])
+        y_new1 = np.array(y_new1).reshape((-1, 1))
+        S = R + H.dot(P_new0).dot(H.T)
+        K = P_new0.dot(H.T.dot(np.linalg.inv(S))) # optimal Kalman gain
+        x_new1 = x_new0 + K.dot(y - y_new1 - H.dot(x_new0 - x_new1))
+        P_new1 = (np.eye(x_old.shape[0]) - K.dot(H)).dot(P_new0)
+    
+    return x_new1.reshape(x_new1.shape[0]), P_new1, x_new0.reshape(x_new0.shape[0]), P_new0
+
 def Rauch_smoother_EKF(x_old1, P_old1, x_new0, P_new0, x_new2, P_new2):
     # Rauch smoother
     # the type of all inputs should be np.array

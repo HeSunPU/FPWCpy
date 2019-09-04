@@ -159,7 +159,7 @@ class Optimal_probe:
 					print('SGD #: {}, total: {:.3f}, regularization: {:.3e}'.format(i, 
 									cost_values, cost_values2-cost_values))
 			u1p_values = sess.run(self.u1p)
-		return u1p_values
+		return u1p_values, cost_values
 
 class Empirical_probe:
 	def __init__(self, model, params_values, img_number, pair_wise=True, probe_area=[1, 17, -17, 17], method='rot'):
