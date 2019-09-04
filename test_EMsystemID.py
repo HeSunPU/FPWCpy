@@ -41,10 +41,10 @@ if __name__ == "__main__":
 	du[:, 0] = u[:, 0]
 	for k in range(1, u.shape[1]):
 		du[:, k] = u[:, k] - u[:, k-1]
-	Ip_list = []
 
+	Ip_list = []
 	for k in range(n_waves):
-		Ip_list.append(Ip[:, k, :, :])
+		Ip_list.append(Ip[:, :, k, :])
 	Ip = np.concatenate(Ip_list, 0)
 
 	u1_train = du[0:952, :]
@@ -61,5 +61,7 @@ if __name__ == "__main__":
 	data_train['u2p'] = u2p_train
 	data_train['I'] = Ip
 
-	mse_list = em_identifier.train_params(data_train, lr=1e-7, 
-							lr2=1e-2, epoch=10, print_flag=True)
+	mse_list = em_identifier.train_params(data_train, lr=1e-6, 
+							lr2=1e-2, epoch=10, print_flag=True,
+							params_trainable='jacobian')
+
