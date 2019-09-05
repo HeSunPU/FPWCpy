@@ -255,7 +255,7 @@ class linear_em:
 		model = SSM(G1, G2, Q0, Q1, R0, R1, n_image)
 
 		# define the computation graphs of estimators and smoothers
-		Enp_lse, P_lse, _ = LSEnet(model, Ip, u1p, u2p)
+		Enp_lse, P_lse, H = LSEnet(model, Ip, u1p, u2p)
 		Enp_kf, P_kf = KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p)
 		Enp_rs, P_rs = RSnet(model, Enp_old, P_old, Enp_new, P_new, u1c, u2c)
 
@@ -268,28 +268,34 @@ class linear_em:
 		obs_cov = 0.#4 * tf.tensordot(tf.expand_dims(tf.reduce_mean(Ip, -1), -1), tf.ones((1, n_pix), dtype=tf.float64), [-1, 0]) * tf.tile(tf.expand_dims(tf.trace(P_est), 1), [1, n_image, 1])
 		Rp = model.observation_covariance(Ip, u1p, u2p)
 
-		# Ip_pred_diff = Ip_pred[:, 1::2, :] - Ip_pred[:, 2::2, :]
-		# Ip_diff = Ip[:, 1::2, :] - Ip[:, 2::2, :]
-		# Rp_diff = Rp[:, 1::2, :] + Rp[:, 2::2, :]
-		# HPHt = tf.matmul(tf.matmul(H, P_est), tf.transpose(H, [0, 1, 3, 2]))
-		# obs_bias = tf.transpose(tf.linalg.diag_part(HPHt), [0, 2, 1])
+		Ip_pred_diff = Ip_pred[:, 1::2, :] - Ip_pred[:, 2::2, :]
+		Ip_diff = Ip[:, 1::2, :] - Ip[:, 2::2, :]
+		Rp_diff = Rp[:, 1::2, :] + Rp[:, 2::2, :]
+		HPHt = tf.matmul(tf.matmul(H, P_new), tf.transpose(H, [0, 1, 3, 2]))
+		obs_bias = tf.transpose(tf.linalg.diag_part(HPHt), [0, 2, 1])
 
 		# evidence lower bound (elbo): cost function for system identification
 		# we need to maximize the elbo for system ID
-		elbo = - tf.reduce_sum((tf.abs(Ip-Ip_pred-Ip_pred_err)**2 + obs_cov) / Rp) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
-				(tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) + \
-				 tf.reduce_sum(tf.trace(P_old) / Qco) + tf.reduce_sum(tf.trace(P_new) / Qco))
+		# elbo = - tf.reduce_sum((tf.abs(Ip-Ip_pred-Ip_pred_err)**2 + obs_cov) / Rp) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
+				# (tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) + \
+				 # tf.reduce_sum(tf.trace(P_old) / Qco) + tf.reduce_sum(tf.trace(P_new) / Qco))
+				 
 		# elbo = - (tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) + \
-		# 		 tf.reduce_sum(tf.trace(P_old) / Qco) + tf.reduce_sum(tf.trace(P_new) / Qco))
-
+				 # tf.reduce_sum(tf.trace(P_old) / Qco) + tf.reduce_sum(tf.trace(P_new) / Qco))
+				 
+		# elbo = - tf.reduce_sum((tf.abs(Ip-Ip_pred-Ip_pred_err)**2 + obs_cov) / Rp) - tf.reduce_sum(tf.log(2*np.pi*Rp))
+		
 		# elbo = - (tf.reduce_sum(tf.abs(Enp_pred-Enp_est)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) - \
 		# 		 tf.reduce_sum(tf.linalg.logdet(P_est)) + tf.reduce_sum(tf.trace(P_est) / Qco))
 
 
-		# elbo = - tf.reduce_sum((tf.abs(Ip_diff-Ip_pred_diff)**2 + obs_bias) / Rp_diff) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
-		# 		(tf.reduce_sum(tf.abs(Enp_pred-Enp_est)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) - \
-		# 		 tf.reduce_sum(tf.linalg.logdet(P_est)) + tf.reduce_sum(tf.trace(P_est) / Qco))
+		elbo = - tf.reduce_sum((tf.abs(Ip_diff-Ip_pred_diff)**2 + obs_bias) / Rp_diff) - tf.reduce_sum(tf.log(2*np.pi*Rp)) - \
+				(tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2 / Qco) + tf.reduce_sum(2 * tf.log(Qco)) + \
+				 tf.reduce_sum(tf.trace(P_old) / Qco) + tf.reduce_sum(tf.trace(P_new) / Qco))
+				 
+		# elbo = - tf.reduce_sum((tf.abs(Ip_diff-Ip_pred_diff)**2) / Rp_diff)
 
+				 
 
 		params_list = model.get_params() # parameters to be identified
 
@@ -315,8 +321,10 @@ class linear_em:
 		self.elbo = elbo
 
 		# mean squared error (MSE): a metric for checking the system ID results
-		self.MSE = tf.reduce_sum(tf.abs(Ip - Ip_pred)**2)
-		# self.MSE = tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2)
+		# self.MSE = tf.reduce_sum(tf.abs(Ip - Ip_pred)**2)
+		# self.MSE = tf.reduce_sum(tf.abs(Ip_diff-Ip_pred_diff)**2)
+		self.MSE = tf.reduce_sum(tf.abs(Enp_new-Enp_pred)**2)
+		# self.MSE = -elbo
 
 		# start identifying/learning the model parameters
 		self.train_Jacobian = tf.train.AdamOptimizer(learning_rate=learning_rate, 
@@ -329,7 +337,7 @@ class linear_em:
 		self.init = tf.global_variables_initializer()
 
 	def train_params(self, data_train, lr=1e-7, lr2=1e-2, epoch=2, 
-					print_flag=False, params_trainable='all'):
+					print_flag=False, mstep_itr=100, params_trainable='all'):
 		u1_train = data_train['u1']
 		u2_train = data_train['u2']
 		u1p_train = data_train['u1p']
@@ -342,8 +350,8 @@ class linear_em:
 		n_pair = u1p_train.shape[1]//2 # number of probing pairs in each control step
 		n_image = 2 * n_pair + 1 # number of probe images in each control step
 
-		u1p_train = np.concatenate([np.zeros((n_act, 1, n_step)), u1p_train], axis=1)
-		u2p_train = np.concatenate([np.zeros((n_act, 1, n_step)), u2p_train], axis=1)
+		u1p_train = np.concatenate([np.zeros((n_act, 1, n_step+1)), u1p_train], axis=1)
+		u2p_train = np.concatenate([np.zeros((n_act, 1, n_step+1)), u2p_train], axis=1)
 
 		if params_trainable.lower() == 'jacobian':
 			train_op = self.train_Jacobian
@@ -371,13 +379,15 @@ class linear_em:
 			Enp_est_values, P_est_values = sess.run([self.Enp_lse, self.P_lse], feed_dict={self.Ip: np.transpose(image_train, [2, 1, 0]),
 															self.u1p: np.transpose(u1p_train, [2, 1, 0]),
 															self.u2p: np.transpose(u2p_train, [2, 1, 0])})
-			mse = sess.run(self.MSE, feed_dict={self.Ip: np.transpose(image_train[:, :, 1:n_step], [2, 1, 0]),
-											self.Enp_old: Enp_est_values[0:n_step-1, :],
-											self.Enp_new: Enp_est_values[1:n_step, :],
-											self.u1c: np.transpose(u1_train[:,1:n_step]), 
-											self.u2c: np.transpose(u2_train[:,1:n_step]),
-											self.u1p: np.transpose(u1p_train[:, :, 1:n_step], [2, 1, 0]),
-											self.u2p: np.transpose(u2p_train[:, :, 1:n_step], [2, 1, 0])})
+			mse = sess.run(self.MSE, feed_dict={self.Ip: np.transpose(image_train[:, :, 1:n_step+1], [2, 1, 0]),
+											self.Enp_old: Enp_est_values[0:n_step, :],
+											self.P_old: P_est_values[0:n_step, :, :, :],
+											self.Enp_new: Enp_est_values[1:n_step+1, :],
+											self.P_new: P_est_values[1:n_step+1, :, :, :],
+											self.u1c: np.transpose(u1_train[:,0:n_step]), 
+											self.u2c: np.transpose(u2_train[:,0:n_step]),
+											self.u1p: np.transpose(u1p_train[:, :, 1:n_step+1], [2, 1, 0]),
+											self.u2p: np.transpose(u2p_train[:, :, 1:n_step+1], [2, 1, 0])})
 
 			mse_list.append(mse)
 			if print_flag:
@@ -394,24 +404,24 @@ class linear_em:
 			# start E-M algorithm iterations
 			for k in range(epoch):
 				# E-step: estimate the electric field
-				Enp_est_values, P_est_values = sess.run([self.Enp_lse, self.P_lse], feed_dict={self.Ip: np.transpose(image_train, [2, 1, 0]),
-														self.u1p: np.transpose(u1p_train, [2, 1, 0]),
-														self.u2p: np.transpose(u2p_train, [2, 1, 0])})
-				for i in range(1, n_step):
+				# Enp_est_values, P_est_values = sess.run([self.Enp_lse, self.P_lse], feed_dict={self.Ip: np.transpose(image_train, [2, 1, 0]),
+															# self.u1p: np.transpose(u1p_train, [2, 1, 0]),
+															# self.u2p: np.transpose(u2p_train, [2, 1, 0])})
+				for i in range(1, n_step+1):
 					Enp_est_values_now, P_est_values_now = sess.run([self.Enp_kf, self.P_kf], feed_dict={self.Ip: np.transpose(np.expand_dims(image_train[:, :, i], -1), [2, 1, 0]),
 												self.u1p: np.transpose(np.expand_dims(u1p_train[:, :, i], -1), [2, 1, 0]),
 												self.u2p: np.transpose(np.expand_dims(u2p_train[:, :, i], -1), [2, 1, 0]),
-												self.u1c: np.transpose(np.expand_dims(u1_train[:,i], -1)), 
-												self.u2c: np.transpose(np.expand_dims(u2_train[:,i], -1)),
+												self.u1c: np.transpose(np.expand_dims(u1_train[:,i-1], -1)), 
+												self.u2c: np.transpose(np.expand_dims(u2_train[:,i-1], -1)),
 												self.Enp_old: np.expand_dims(Enp_est_values[i-1, :], 0),
 												self.P_old: np.expand_dims(P_est_values[i-1, :, :, :], 0)})
 					Enp_est_values[i, :] = np.squeeze(Enp_est_values_now)
 					P_est_values[i, :, :, :] = np.squeeze(P_est_values_now)
 
-				for i in range(n_step-1, 0, -1):
+				for i in range(n_step, 0, -1):
 					Enp_est_values_now, P_est_values_now = sess.run([self.Enp_rs, self.P_rs], feed_dict={
-												self.u1c: np.transpose(np.expand_dims(u1_train[:,i], -1)), 
-												self.u2c: np.transpose(np.expand_dims(u2_train[:,i], -1)),
+												self.u1c: np.transpose(np.expand_dims(u1_train[:,i-1], -1)), 
+												self.u2c: np.transpose(np.expand_dims(u2_train[:,i-1], -1)),
 												self.Enp_old: np.expand_dims(Enp_est_values[i-1, :], 0),
 												self.P_old: np.expand_dims(P_est_values[i-1, :, :, :], 0),
 												self.Enp_new: np.expand_dims(Enp_est_values[i, :], 0),
@@ -420,24 +430,27 @@ class linear_em:
 					P_est_values[i-1, :, :, :] = np.squeeze(P_est_values_now)
 
 				# M-step: train the model parameters
-				sess.run(train_op, feed_dict={self.Enp_old: Enp_est_values[0:n_step-1, :], 
-												self.P_old: P_est_values[0:n_step-1, :, :, :],
-												self.Enp_new: Enp_est_values[1:n_step, :],
-												self.P_new: P_est_values[1:n_step, :, :, :],
-												self.Ip: np.transpose(image_train[:, :, 1:n_step], [2, 1, 0]),
-												self.u1c: np.transpose(u1_train[:,1:n_step]), 
-												self.u2c: np.transpose(u2_train[:,1:n_step]),
-												self.u1p: np.transpose(u1p_train[:, :, 1:n_step], [2, 1, 0]), 
-												self.u2p: np.transpose(u2p_train[:, :, 1:n_step], [2, 1, 0]),
-												self.learning_rate: lr, self.learning_rate2: lr2})
+				for i in range(mstep_itr):
+					sess.run(train_op, feed_dict={self.Enp_old: Enp_est_values[0:n_step, :], 
+													self.P_old: P_est_values[0:n_step, :, :, :],
+													self.Enp_new: Enp_est_values[1:n_step+1, :],
+													self.P_new: P_est_values[1:n_step+1, :, :, :],
+													self.Ip: np.transpose(image_train[:, :, 1:n_step+1], [2, 1, 0]),
+													self.u1c: np.transpose(u1_train[:,0:n_step]), 
+													self.u2c: np.transpose(u2_train[:,0:n_step]),
+													self.u1p: np.transpose(u1p_train[:, :, 1:n_step+1], [2, 1, 0]), 
+													self.u2p: np.transpose(u2p_train[:, :, 1:n_step+1], [2, 1, 0]),
+													self.learning_rate: lr, self.learning_rate2: lr2})
 
-				mse = sess.run(self.MSE, feed_dict={self.Ip: np.transpose(image_train[:, :, 1:n_step], [2, 1, 0]),
-											self.Enp_old: Enp_est_values[0:n_step-1, :],
-											self.Enp_new: Enp_est_values[1:n_step, :],
-											self.u1c: np.transpose(u1_train[:,1:n_step]), 
-											self.u2c: np.transpose(u2_train[:,1:n_step]),
-											self.u1p: np.transpose(u1p_train[:, :, 1:n_step], [2, 1, 0]),
-											self.u2p: np.transpose(u2p_train[:, :, 1:n_step], [2, 1, 0])})
+				mse = sess.run(self.MSE, feed_dict={self.Ip: np.transpose(image_train[:, :, 1:n_step+1], [2, 1, 0]),
+											self.Enp_old: Enp_est_values[0:n_step, :],
+											self.P_old: P_est_values[0:n_step, :, :, :],
+											self.Enp_new: Enp_est_values[1:n_step+1, :],
+											self.P_new: P_est_values[1:n_step+1, :, :, :],
+											self.u1c: np.transpose(u1_train[:,0:n_step]), 
+											self.u2c: np.transpose(u2_train[:,0:n_step]),
+											self.u1p: np.transpose(u1p_train[:, :, 1:n_step+1], [2, 1, 0]),
+											self.u2p: np.transpose(u2p_train[:, :, 1:n_step+1], [2, 1, 0])})
 				mse_list.append(mse)
 				if print_flag:
 					print('epoch {} MSE: {}'.format(k, mse))

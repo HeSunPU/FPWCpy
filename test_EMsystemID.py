@@ -62,6 +62,6 @@ if __name__ == "__main__":
 	data_train['I'] = Ip
 
 	mse_list = em_identifier.train_params(data_train, lr=1e-6, 
-							lr2=1e-2, epoch=10, print_flag=True,
+							lr2=1e-2, epoch=100, print_flag=True,
 							params_trainable='jacobian')
 
