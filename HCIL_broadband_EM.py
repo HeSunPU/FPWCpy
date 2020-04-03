@@ -80,7 +80,7 @@ if __name__ == "__main__":
 		data_train['u1p'] = u1p_train
 		data_train['u2p'] = u2p_train
 		data_train['I'] = Ip
-
+ 
 		# mse_list = em_identifier.train_params(data_train, lr=3e-7,
 								# lr2=3e-3, epoch=2, print_flag=True, params_trainable='jacobian')
 		if model_type == 'reduced':
