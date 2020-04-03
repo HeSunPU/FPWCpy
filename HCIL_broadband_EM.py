@@ -11,8 +11,10 @@ if __name__ == "__main__":
 	n_act = 952
 	n_pair = 2
 	n_waves = 5
-	n_EMitr = 10
-	folder = 'C:/Lab/FPWCmatlab/dataLibrary/20190904/'
+	n_EMitr = 3#10
+	folder = 'C:/Lab/FPWCmatlab/dataLibrary/20191015/'
+	model_type = 'reduced' # 'normal' or 'reduced'
+	model_dim = 200
 
 	modelIFS = sio.loadmat('C:/Lab/FPWCmatlab/modelIFS.mat')
 
@@ -33,13 +35,18 @@ if __name__ == "__main__":
 	params_values['G1'] = G1
 	params_values['G2'] = G2
 	params_values['Q0'] = 1e-14
-	params_values['Q1'] = 0.1 # 0.5 # 1e-8 for u^2, 6e-8 for u^3, 0.5 for 
-	params_values['R0'] = 5e-14 # 3.6e-17#/exp_time**2 #1e-14
+	params_values['Q1'] = 0.8 # 0.1 # 0.5 # 1e-8 for u^2, 6e-8 for u^3, 0.5 for 
+	params_values['R0'] = 1.5e-12#5e-14 # 3.6e-17#/exp_time**2 #1e-14
 	params_values['R1'] = 1e-7 # 5e-10
+	if model_type == 'reduced':
+		G = np.concatenate([G1.real, G1.imag, G2.real, G2.imag], axis=0)
+		U, s, V = np.linalg.svd(G, full_matrices=False)
+		params_values['U'] = np.matmul(U[:, 0:model_dim], np.diag(np.sqrt(s[0:model_dim])))
+		params_values['V'] = np.matmul(np.diag(np.sqrt(s[0:model_dim])), V[0:model_dim, :])
 
-	em_identifier = em.linear_em(params_values, n_pair)
+	em_identifier = em.linear_em(params_values, n_pair, model_type=model_type, dim=model_dim)
 
-	for kEM in range(n_EMitr):
+	for kEM in range(n_EMitr): # run for each system id iteration
 		print('********************Itr #{}: running system identification********************'.format(kEM))
 		while not os.path.exists(folder+'dataIFS'+str(kEM+1)+'.mat'):
 			time.sleep(1)
@@ -74,8 +81,14 @@ if __name__ == "__main__":
 		data_train['u2p'] = u2p_train
 		data_train['I'] = Ip
 
-		mse_list = em_identifier.train_params(data_train, lr=1e-6, 
-								lr2=1e-2, epoch=3, print_flag=True)
+		# mse_list = em_identifier.train_params(data_train, lr=3e-7, 
+								# lr2=3e-3, epoch=2, print_flag=True, params_trainable='jacobian')
+		if model_type == 'reduced':
+			mse_list = em_identifier.train_params(data_train, lr=3e-6, 
+								lr2=3e-3, epoch=2, print_flag=True, params_trainable='all')
+		elif model_type == 'normal':
+			mse_list = em_identifier.train_params(data_train, lr=3e-7, 
+									lr2=3e-3, epoch=2, print_flag=True, params_trainable='all')
 		
 		for k in range(n_waves):
 			G1_broadband[:, :, k] = em_identifier.params_values['G1'][k*n_pix:(k+1)*n_pix, :, 0]

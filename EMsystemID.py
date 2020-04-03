@@ -43,21 +43,39 @@ References:
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import scipy.io as sio
 
 plt.ion()
 
 class SSM(object):
 	# linear state space model for the optical system
 	# the incoherent light is not considered here, however, it should be easy to include them
-	def __init__(self, Jacobian1, Jacobian2, Q0, Q1, R0, R1, n_observ=4):
+	def __init__(self, Jacobian1, Jacobian2, Q0, Q1, R0, R1, n_observ=4, model_type='normal', dim=200):
+		# Jacobian1 and Jacobian2 are the initial knowladge of the Jacobian matrices
 		# parameters Q0, Q1, R0, R1 define the noise covariance of the state space model
 		# process noises covariance: Q = Q0 + Q1 * sum(uc^2)
 		# observation noises covariance: R = R0 + R1 * probe_contrast + R2 * probe_contrast^2
+		# n_observ is the number of camera images
+		# model_type includes "normal" and "reduced"
+		# dim defines the dimension of the reduced-order model
 		# Jacobian matrices
-		self.G1_real = tf.Variable(Jacobian1.real, dtype=tf.float64)
-		self.G1_imag = tf.Variable(Jacobian1.imag, dtype=tf.float64)
-		self.G2_real = tf.Variable(Jacobian2.real, dtype=tf.float64)
-		self.G2_imag = tf.Variable(Jacobian2.imag, dtype=tf.float64)
+		self.model_type = model_type
+		if model_type == 'normal':
+			self.G1_real = tf.Variable(Jacobian1.real, dtype=tf.float64)
+			self.G1_imag = tf.Variable(Jacobian1.imag, dtype=tf.float64)
+			self.G2_real = tf.Variable(Jacobian2.real, dtype=tf.float64)
+			self.G2_imag = tf.Variable(Jacobian2.imag, dtype=tf.float64)
+		elif model_type == 'reduced':
+			n_pix = Jacobian1.shape[0]
+			G = np.concatenate([Jacobian1.real, Jacobian1.imag, Jacobian2.real, Jacobian2.imag], axis=0)
+			U, s, V = np.linalg.svd(G, full_matrices=False)
+			self.U_svd = tf.Variable(np.matmul(U[:, 0:dim], np.diag(np.sqrt(s[0:dim]))), dtype=tf.float64)
+			self.V_svd = tf.Variable(np.matmul(np.diag(np.sqrt(s[0:dim])), V[0:dim, :]), dtype=tf.float64)
+			G_svd = tf.matmul(self.U_svd, self.V_svd)
+			self.G1_real = G_svd[0:n_pix]
+			self.G1_imag = G_svd[n_pix:2*n_pix]
+			self.G2_real = G_svd[2*n_pix:3*n_pix]
+			self.G2_imag = G_svd[3*n_pix:4*n_pix]
 		
 		# noise parameters, all of them should be positive
 		self.q0 = tf.Variable(np.log(Q0), dtype=tf.float64)
@@ -93,10 +111,14 @@ class SSM(object):
 		# u2_cubic = tf.reduce_sum(tf.abs(u2)**3, axis=1)
 		# Qco = tf.tensordot(tf.expand_dims(u1_cubic, 1), tf.expand_dims(self.Q1*tf.ones(self.num_pix, dtype=tf.float64), 0), axes=[[1], [0]]) + \
 		# 	tf.tensordot(tf.expand_dims(u2_cubic, 1), tf.expand_dims(self.Q1*tf.ones(self.num_pix, dtype=tf.float64), 0), axes=[[1], [0]]) + self.Q0 + 1e-14
-		dE = tf.cast(tf.tensordot(u1, self.G1_real, axes=[[-1], [1]]) + tf.tensordot(u2, self.G2_real, axes=[[-1], [1]]), tf.complex128) + \
-					+ 1j * tf.cast(tf.tensordot(u1, self.G1_imag, axes=[[-1], [1]]) + tf.tensordot(u2, self.G2_imag, axes=[[-1], [1]]), tf.complex128)
-		dE_square = tf.reduce_mean(tf.abs(dE)**2, axis=1)
-		Qco = tf.tensordot(tf.expand_dims(dE_square, 1), tf.expand_dims(self.Q1*tf.ones(self.num_pix, dtype=tf.float64), 0), axes=[[1], [0]]) + self.Q0 + 1e-14
+		
+		# dE = tf.cast(tf.tensordot(u1, self.G1_real, axes=[[-1], [1]]) + tf.tensordot(u2, self.G2_real, axes=[[-1], [1]]), tf.complex128) + \
+					# + 1j * tf.cast(tf.tensordot(u1, self.G1_imag, axes=[[-1], [1]]) + tf.tensordot(u2, self.G2_imag, axes=[[-1], [1]]), tf.complex128)
+		# dE_square = tf.reduce_mean(tf.abs(dE)**2, axis=1)
+		# Qco = tf.tensordot(tf.expand_dims(dE_square, 1), tf.expand_dims(self.Q1*tf.ones(self.num_pix, dtype=tf.float64), 0), axes=[[1], [0]]) + self.Q0 + 1e-14
+		
+		u_square = tf.reduce_mean(tf.abs(u1**2+u2**2), axis=1)
+		Qco = tf.tensordot(1e-3*tf.expand_dims(u_square, 1), tf.expand_dims(self.Q1*tf.ones(self.num_pix, dtype=tf.float64), 0), axes=[[1], [0]]) + self.Q0 + 1e-14
 		return Qco
 	def observation(self, Enp, u_p1, u_p2):
 		# observation model
@@ -120,21 +142,35 @@ class SSM(object):
 		dEp = tf.cast(tf.tensordot(u_p1, self.G1_real, axes=[[-1], [1]]) + tf.tensordot(u_p2, self.G2_real, axes=[[-1], [1]]), tf.complex128) + \
 					+ 1j * tf.cast(tf.tensordot(u_p1, self.G1_imag, axes=[[-1], [1]]) + tf.tensordot(u_p2, self.G2_imag, axes=[[-1], [1]]), tf.complex128)
 		d_contrast_p = tf.reduce_mean(tf.abs(dEp)**2, axis=2)
-		R = tf.tensordot(tf.expand_dims(self.R0 + self.R1*contrast_p + 4*(self.Q0+self.Q1*d_contrast_p)*contrast_p, axis=-1), tf.ones((1, self.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
+		# R = tf.tensordot(tf.expand_dims(self.R0 + self.R1*contrast_p + 4*(self.Q0+self.Q1*d_contrast_p)*contrast_p, axis=-1), tf.ones((1, self.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
+		R = tf.tensordot(tf.expand_dims(self.R0*tf.ones_like(contrast_p), axis=-1), tf.ones((1, self.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
 		return R
 	def get_params(self):
 		# get the parameters of the identified system
-		return [self.G1_real, self.G1_imag, self.G2_real, self.G2_imag,
-				self.q0, self.q1, self.r0, self.r1]
+		if self.model_type == 'normal':
+			return [self.G1_real, self.G1_imag, self.G2_real, self.G2_imag,
+					self.q0, self.q1, self.r0, self.r1]
+		elif self.model_type == 'reduced':
+			return [self.U_svd, self.V_svd,
+					self.q0, self.q1, self.r0, self.r1]
 
 
 def LSEnet(model, Ip, u1p, u2p):
+	n_pair = 2
 	# computation graph that defines least squared estimation of the electric field
 	delta_Ep_pred = tf.cast(tf.tensordot(u1p, model.G1_real, axes=[[-1], [1]]) + tf.tensordot(u2p, model.G2_real, axes=[[-1], [1]]), tf.complex128) + \
 			+ 1j * tf.cast(tf.tensordot(u1p, model.G1_imag, axes=[[-1], [1]]) + tf.tensordot(u2p, model.G2_imag, axes=[[-1], [1]]), tf.complex128)
+	
 	delta_Ep_expand = tf.expand_dims(delta_Ep_pred, 2)
 	delta_Ep_expand_diff = delta_Ep_expand[:, 1::2, :, :] - delta_Ep_expand[:, 2::2, :, :]
+	
+	# amp_square = 0.5 * (Ip[:, 1::2, :]+Ip[:, 2::2, :]) - tf.tile(tf.expand_dims(Ip[:, 0, :], 1), [1, n_pair, 1])
+	# amp = tf.sqrt(tf.maximum(amp_square, tf.zeros_like(amp_square)))
+	# amp_expand = tf.expand_dims(amp, 2)
+	# delta_Ep_expand_diff = delta_Ep_expand_diff * tf.cast(amp_expand / tf.abs(delta_Ep_expand_diff), tf.complex128)
+	
 	y = tf.transpose(Ip[:, 1::2, :]-Ip[:, 2::2, :], [0, 2, 1])
+	
 	H = tf.concat([2*tf.real(delta_Ep_expand_diff), 2*tf.imag(delta_Ep_expand_diff)], axis=2)
 	H = tf.transpose(H, [0, 3, 1, 2])
 	Ht_H = tf.matmul(tf.transpose(H, [0, 1, 3, 2]), H)
@@ -146,7 +182,9 @@ def LSEnet(model, Ip, u1p, u2p):
 
 	d_contrast_p = tf.reduce_mean(tf.abs(delta_Ep_pred)**2, axis=2)
 
-	Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + 4*(model.Q0+model.Q1*d_contrast_p)*contrast_p, axis=-1), 
+	# Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + 4*(model.Q0+model.Q1*d_contrast_p)*contrast_p, axis=-1), 
+						# tf.ones((1, model.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24
+	Rp = tf.tensordot(tf.expand_dims(model.R0*tf.ones_like(contrast_p), axis=-1), 
 						tf.ones((1, model.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
 	Rp = tf.transpose(Rp, [0, 2, 1])
 	R_diff = Rp[:, :, 1::2]+Rp[:, :, 2::2]
@@ -156,11 +194,18 @@ def LSEnet(model, Ip, u1p, u2p):
 	return Enp_pred_new, P_new, H
 
 def KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p):
+	n_pair = 2
 	# computation graph that defines Kalman filtering estimation of the electric field
 	delta_Ep_pred = tf.cast(tf.tensordot(u1p, model.G1_real, axes=[[-1], [1]]) + tf.tensordot(u2p, model.G2_real, axes=[[-1], [1]]), tf.complex128) + \
 			+ 1j * tf.cast(tf.tensordot(u1p, model.G1_imag, axes=[[-1], [1]]) + tf.tensordot(u2p, model.G2_imag, axes=[[-1], [1]]), tf.complex128)
 	delta_Ep_expand = tf.expand_dims(delta_Ep_pred, 2)
 	delta_Ep_expand_diff = delta_Ep_expand[:, 1::2, :, :] - delta_Ep_expand[:, 2::2, :, :]
+	
+	# amp_square = 0.5 * (Ip[:, 1::2, :]+Ip[:, 2::2, :]) - tf.tile(tf.expand_dims(Ip[:, 0, :], 1), [1, n_pair, 1])
+	# amp = tf.sqrt(tf.maximum(amp_square, tf.zeros_like(amp_square)))
+	# amp_expand = tf.expand_dims(amp, 2)
+	# delta_Ep_expand_diff = delta_Ep_expand_diff * tf.cast(amp_expand / tf.abs(delta_Ep_expand_diff), tf.complex128)
+	
 	y = tf.transpose(Ip[:, 1::2, :]-Ip[:, 2::2, :], [0, 2, 1])
 	H = tf.concat([2*tf.real(delta_Ep_expand_diff), 2*tf.imag(delta_Ep_expand_diff)], axis=2)
 	H = tf.transpose(H, [0, 3, 1, 2])
@@ -169,7 +214,9 @@ def KFnet(model, Ip, Enp_old, P_old, u1c, u2c, u1p, u2p):
 	contrast_p = tf.reduce_mean(Ip, axis=2)
 	d_contrast_p = tf.reduce_mean(tf.abs(delta_Ep_pred)**2, axis=2)
 
-	Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + 4*(model.Q0+model.Q1*d_contrast_p)*contrast_p, axis=-1), 
+	# Rp = tf.tensordot(tf.expand_dims(model.R0 + model.R1*contrast_p + 4*(model.Q0+model.Q1*d_contrast_p)*contrast_p, axis=-1), 
+						# tf.ones((1, model.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24
+	Rp = tf.tensordot(tf.expand_dims(model.R0*tf.ones_like(contrast_p), axis=-1), 
 						tf.ones((1, model.num_pix), dtype=tf.float64), axes=[[-1], [0]]) + 1e-24	
 	Rp = tf.transpose(Rp, [0, 2, 1])
 	R_diff = Rp[:, :, 1::2]+Rp[:, :, 2::2]
@@ -222,7 +269,7 @@ def RSnet(model, Enp_old, P_old, Enp_new, P_new, u1c, u2c):
 
 
 class linear_em:
-	def __init__(self, params_values, n_pair):
+	def __init__(self, params_values, n_pair, model_type='normal', dim=200):
 		self.params_values = params_values
 
 		G1 = np.squeeze(params_values['G1'])
@@ -252,7 +299,10 @@ class linear_em:
 
 		# define the optical model as a state space model (SSM) or a neural network
 		# model = SSM(G1, G2, Q0, Q1, R0, R1, R2, n_image)
-		model = SSM(G1, G2, Q0, Q1, R0, R1, n_image)
+		if model_type == 'normal':
+			model = SSM(G1, G2, Q0, Q1, R0, R1, n_image)
+		elif model_type == 'reduced':
+			model = SSM(G1, G2, Q0, Q1, R0, R1, n_image, model_type=model_type, dim=dim)
 
 		# define the computation graphs of estimators and smoothers
 		Enp_lse, P_lse, H = LSEnet(model, Ip, u1p, u2p)
@@ -327,12 +377,20 @@ class linear_em:
 		# self.MSE = -elbo
 
 		# start identifying/learning the model parameters
-		self.train_Jacobian = tf.train.AdamOptimizer(learning_rate=learning_rate, 
-												beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[0:4])
-		self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
-												beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[4::])
-		# self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
-		# 										beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=[params_list[4], params_list[5]])
+		if self.model.model_type == 'normal':
+			self.train_Jacobian = tf.train.AdamOptimizer(learning_rate=learning_rate, 
+													beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[0:4])
+			# self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
+													# beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[4::])
+			self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
+													beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[4:-1])
+		elif self.model.model_type == 'reduced':
+			self.train_Jacobian = tf.train.AdamOptimizer(learning_rate=learning_rate, 
+													beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[0:2])
+			# self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
+													# beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[2::])
+			self.train_noise_coef = tf.train.AdamOptimizer(learning_rate=learning_rate2, 
+													beta1=0.99, beta2=0.9999, epsilon=1e-08).minimize(-elbo, var_list=params_list[2:-1])
 		self.train_group = tf.group(self.train_Jacobian, self.train_noise_coef)
 		self.init = tf.global_variables_initializer()
 
@@ -366,10 +424,14 @@ class linear_em:
 		with tf.Session() as sess:
 			sess.run(self.init)
 			# assign values to the variables in the model
-			self.model.G1_real.load(np.squeeze(self.params_values['G1']).real)
-			self.model.G1_imag.load(np.squeeze(self.params_values['G1']).imag)
-			self.model.G2_real.load(np.squeeze(self.params_values['G2']).real)
-			self.model.G2_imag.load(np.squeeze(self.params_values['G2']).imag)
+			if self.model.model_type == 'normal':
+				self.model.G1_real.load(np.squeeze(self.params_values['G1']).real)
+				self.model.G1_imag.load(np.squeeze(self.params_values['G1']).imag)
+				self.model.G2_real.load(np.squeeze(self.params_values['G2']).real)
+				self.model.G2_imag.load(np.squeeze(self.params_values['G2']).imag)
+			elif self.model.model_type == 'reduced':
+				self.model.U_svd.load(self.params_values['U'])
+				self.model.V_svd.load(self.params_values['V'])
 			self.model.q0.load(np.log(self.params_values['Q0']))
 			self.model.q1.load(np.log(self.params_values['Q1']))
 			self.model.r0.load(np.log(self.params_values['R0']))
@@ -388,7 +450,6 @@ class linear_em:
 											self.u2c: np.transpose(u2_train[:,0:n_step]),
 											self.u1p: np.transpose(u1p_train[:, :, 1:n_step+1], [2, 1, 0]),
 											self.u2p: np.transpose(u2p_train[:, :, 1:n_step+1], [2, 1, 0])})
-
 			mse_list.append(mse)
 			if print_flag:
 				print('initial MSE: {}'.format(mse))
@@ -417,7 +478,8 @@ class linear_em:
 												self.P_old: np.expand_dims(P_est_values[i-1, :, :, :], 0)})
 					Enp_est_values[i, :] = np.squeeze(Enp_est_values_now)
 					P_est_values[i, :, :, :] = np.squeeze(P_est_values_now)
-
+				
+				
 				for i in range(n_step, 0, -1):
 					Enp_est_values_now, P_est_values_now = sess.run([self.Enp_rs, self.P_rs], feed_dict={
 												self.u1c: np.transpose(np.expand_dims(u1_train[:,i-1], -1)), 
@@ -428,6 +490,10 @@ class linear_em:
 												self.P_new: np.expand_dims(P_est_values[i, :, :, :], 0)})
 					Enp_est_values[i-1, :] = np.squeeze(Enp_est_values_now)
 					P_est_values[i-1, :, :, :] = np.squeeze(P_est_values_now)
+					
+				folder = 'C:/Lab/FPWCmatlab/dataLibrary/20190919/'
+				sio.savemat(folder+'Enp_est_values'+'.mat', {'Enp_est_values': Enp_est_values})
+				sio.savemat(folder+'P_est_values'+'.mat', {'P_est_values': P_est_values})
 
 				# M-step: train the model parameters
 				for i in range(mstep_itr):
@@ -455,7 +521,7 @@ class linear_em:
 				if print_flag:
 					print('epoch {} MSE: {}'.format(k, mse))
 					# print('Q1: {}, R2: {}'.format(sess.run(self.model.Q1), sess.run(self.model.R2)))
-					print('Q0: {}, Q1: {}'.format(sess.run(self.model.Q0), sess.run(self.model.Q1)))
+					print('Q0: {}, Q1: {}, R0: {}'.format(sess.run(self.model.Q0), sess.run(self.model.Q1), sess.run(self.model.R0)))
 
 			# update the model parameters
 			self.params_values['G1'] = sess.run(self.model.G1_real) + 1j * sess.run(self.model.G1_imag)
@@ -467,5 +533,8 @@ class linear_em:
 			self.params_values['R0'] = np.exp(sess.run(self.model.r0))
 			self.params_values['R1'] = np.exp(sess.run(self.model.r1))
 			# self.params_values['R2'] = np.exp(sess.run(self.model.r2))
+			if self.model.model_type == 'reduced':
+				self.params_values['U'] = sess.run(self.model.U_svd)
+				self.params_values['V'] = sess.run(self.model.V_svd)
 
 		return mse_list
