@@ -7,16 +7,18 @@ import os
 
 if __name__ == "__main__":
 	# define the EM algorithm system identifier
-	n_pix = 188
+	n_pix = 854#188 #sfr
 	n_act = 952
 	n_pair = 2
 	n_waves = 5
-	n_EMitr = 3#10
-	folder = 'C:/Lab/FPWCmatlab/dataLibrary/20191015/'
+	n_EMitr = 2#10
+	# folder = 'C:/Lab/FPWCmatlab/dataLibrary/20191015/'
+	folder = 'C:/Users/sfr/Documents/HCIL_pton/FPWCmatlab/dataLibrary/20200415/'#sfr
 	model_type = 'reduced' # 'normal' or 'reduced'
 	model_dim = 200
 
-	modelIFS = sio.loadmat('C:/Lab/FPWCmatlab/modelIFS.mat')
+	#modelIFS = sio.loadmat('C:/Lab/FPWCmatlab/modelIFS.mat')
+	modelIFS = sio.loadmat('C:/Users/sfr/Documents/HCIL_pton/FPWCmatlab/modelIFS.mat')#sfr
 
 	G1_broadband = modelIFS['modelIFS']['G1'][0, 0]
 	G2_broadband = modelIFS['modelIFS']['G2'][0, 0]
@@ -50,7 +52,7 @@ if __name__ == "__main__":
 		print('********************Itr #{}: running system identification********************'.format(kEM))
 		while not os.path.exists(folder+'dataIFS'+str(kEM+1)+'.mat'):
 			time.sleep(1)
-
+		print('start sys id')
 		dataIFS = sio.loadmat(folder+'dataIFS'+str(kEM+1)+'.mat')
 
 		Ip = dataIFS['dataIFS'+str(kEM+1)]['I'][0, 0]
@@ -64,6 +66,7 @@ if __name__ == "__main__":
 
 		for k in range(n_waves):
 			Ip_list.append(Ip[:, :, k, :])
+			# Ip_list.append(Ip[:, k, :, :]) #sfr
 		Ip = np.concatenate(Ip_list, 0)
 
 		u1_train = du[0:n_act, :]
@@ -80,7 +83,7 @@ if __name__ == "__main__":
 		data_train['u1p'] = u1p_train
 		data_train['u2p'] = u2p_train
 		data_train['I'] = Ip
- 
+
 		# mse_list = em_identifier.train_params(data_train, lr=3e-7,
 								# lr2=3e-3, epoch=2, print_flag=True, params_trainable='jacobian')
 		if model_type == 'reduced':
